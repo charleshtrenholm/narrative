@@ -153,18 +153,14 @@ define(['jobCommChannel', 'base/js/namespace', 'common/runtime', 'testUtil'], (
                 },
             },
             {
-                channel: 'request-job-log-latest',
-                message: { jobId: 'someJob', options: {} },
-                expected: { request_type: 'job_logs_latest', job_id: 'someJob' },
-            },
-            {
-                channel: 'request-job-log-latest',
+                channel: 'request-job-log',
                 message: {
                     jobId: 'someJob',
                     parentJobId: 'none',
                     options: {
                         first_line: 2000,
                         job_id: 'overridden!',
+                        latest_only: true,
                     },
                 },
                 expected: {
@@ -172,6 +168,7 @@ define(['jobCommChannel', 'base/js/namespace', 'common/runtime', 'testUtil'], (
                     job_id: 'overridden!',
                     parent_job_id: 'none',
                     first_line: 2000,
+                    latest_only: true,
                 },
             },
             {

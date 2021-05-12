@@ -60,7 +60,6 @@ define([
         CANCEL_JOB = 'cancel_job',
         RETRY_JOB = 'retry_job',
         JOB_LOGS = 'job_logs',
-        JOB_LOGS_LATEST = 'job_logs_latest',
         JOB_INFO = 'job_info',
         JOB = 'jobId',
         CELL = 'cell';
@@ -176,7 +175,6 @@ define([
                 if (message.options) {
                     msg = Object.assign({}, msg, message.options);
                 }
-
                 this.comm.send(msg);
                 resolve();
             }).catch((err) => {
