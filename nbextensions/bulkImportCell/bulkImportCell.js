@@ -612,9 +612,6 @@ define([
             jobManager = new JobManager({
                 model: model,
                 bus: runtime.bus(),
-                viewResultsFunction: () => {
-                    toggleTab('results');
-                },
             });
 
             // finalize by updating the lastLoaded attribute, which triggers a toolbar re-render
@@ -623,16 +620,18 @@ define([
             cell.metadata = meta;
             render().then(() => {
                 // add in the control panel so we can update the job status in the cell header
-                jobManager.addUpdateHandler({
-                    controlPanel: (updatedModel) => {
+                jobManager.addHandler('modelUpdate', {
+                    controlPanel: (jobManagerContext) => {
                         // Update the execMessage panel with details of the active jobs
                         controlPanel.setExecMessage(
-                            Jobs.createCombinedJobState(updatedModel.getItem('exec.jobs.byStatus'))
+                            Jobs.createCombinedJobState(
+                                jobManagerContext.model.getItem('exec.jobs.byStatus')
+                            )
                         );
                     },
                 });
                 // populate the execMessage with the current job state
-                jobManager.runUpdateHandlers();
+                jobManager.runHandler('modelUpdate');
 
                 cell.renderMinMax();
                 // force toolbar refresh
@@ -700,10 +699,11 @@ define([
                 bus: controllerBus,
                 cell,
                 fileType,
-                jobId: undefined,
+                // jobId: undefined,
                 jobManager,
                 model,
                 spec: specs[typesToFiles[state.fileType.selected].appId],
+                toggleTab,
                 workspaceClient,
             });
 

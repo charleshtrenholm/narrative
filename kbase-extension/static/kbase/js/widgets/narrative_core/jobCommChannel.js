@@ -65,6 +65,34 @@ define([
         JOB = 'jobId',
         CELL = 'cell';
 
+    // Conversion of the message type of an incoming message
+    // to the type used for the message to be sent to the backend
+    const requestTranslation = {
+        'ping-comm-channel': 'ping',
+
+        // Fetches job status from kernel.
+        'request-job-status': JOB_STATUS,
+
+        // Requests job status updates for this job via the job channel, and also
+        // ensures that job polling is running.
+        'request-job-update': START_JOB_UPDATE,
+        // Tells kernel to stop including a job in the lookup loop.
+        'request-job-completion': STOP_JOB_UPDATE,
+
+        // cancels the job
+        'request-job-cancellation': CANCEL_JOB,
+        // retries the job
+        'request-job-retry': RETRY_JOB,
+
+        // Fetches info (not state) about a job, including the app id, name, and inputs.
+        'request-job-info': JOB_INFO,
+
+        // Fetches job logs from kernel.
+        'request-job-log': JOB_LOGS,
+        // Fetches most recent job logs from kernel.
+        'request-job-log-latest': JOB_LOGS_LATEST,
+    };
+
     class JobCommChannel {
         /**
          * Grabs the runtime, inits the set of job states, and registers callbacks against the
@@ -74,6 +102,27 @@ define([
             this.runtime = Runtime.make();
             this.jobStates = {};
             this.handleBusMessages();
+        }
+
+        validIncomingMessageTypes() {
+            return Object.keys(requestTranslation);
+        }
+
+        validOutgoingMessageTypes() {
+            return [
+                'job-cancel-error',
+                'job-canceled',
+                'job-deleted',
+                'job-does-not-exist',
+                'job-error',
+                'job-info',
+                'job-log-deleted',
+                'job-logs',
+                'job-status-error',
+                'job-status',
+                'result',
+                'run-status',
+            ];
         }
 
         /**
@@ -102,33 +151,6 @@ define([
          */
         handleBusMessages() {
             const bus = this.runtime.bus();
-
-            // valid messages
-            const requestTranslation = {
-                'ping-comm-channel': 'ping',
-
-                // Fetches job status from kernel.
-                'request-job-status': JOB_STATUS,
-
-                // Requests job status updates for this job via the job channel, and also
-                // ensures that job polling is running.
-                'request-job-update': START_JOB_UPDATE,
-                // Tells kernel to stop including a job in the lookup loop.
-                'request-job-completion': STOP_JOB_UPDATE,
-
-                // cancels the job
-                'request-job-cancellation': CANCEL_JOB,
-                // retries the job
-                'request-job-retry': RETRY_JOB,
-
-                // Fetches info (not state) about a job, including the app id, name, and inputs.
-                'request-job-info': JOB_INFO,
-
-                // Fetches job logs from kernel.
-                'request-job-log': JOB_LOGS,
-                // Fetches most recent job logs from kernel.
-                'request-job-log-latest': JOB_LOGS_LATEST,
-            };
 
             for (const [key, value] of Object.entries(requestTranslation)) {
                 bus.on(key, (message) => {

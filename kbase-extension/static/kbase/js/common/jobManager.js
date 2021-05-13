@@ -1,12 +1,32 @@
-define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, UI, String) => {
+define(['common/jobMessages'], (JobMessages) => {
     'use strict';
 
-    const div = html.tag('div'),
-        p = html.tag('p'),
-        jobCommand = {
-            cancel: 'request-job-cancellation',
-            retry: 'request-job-retry',
-        };
+    const validOutgoingMessageTypes = [
+        'job-cancel-error',
+        'job-canceled',
+        'job-deleted',
+        'job-does-not-exist',
+        'job-error',
+        'job-info',
+        'job-log-deleted',
+        'job-logs',
+        // NEW
+        'job-retried',
+        'job-status',
+        'result',
+        'run-status',
+    ];
+
+    const jobCommand = {
+        cancel: {
+            command: 'request-job-cancellation',
+            listener: 'job-canceled',
+        },
+        retry: {
+            command: 'request-job-retry',
+            listener: 'job-retried',
+        },
+    };
 
     class JobManager {
         /**
@@ -15,43 +35,68 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
          * @param {object} config with keys
          *  {object}    model: cell model, including job information under `exec.jobs`
          *  {object}    bus: the bus for communicating messages to the kernel
-         *  {function}  viewResultsFunction: function to display the results of a job
          *
          * @returns {object} the initialised job manager
          */
         constructor(config) {
-            ['bus', 'model', 'viewResultsFunction'].forEach((key) => {
+            ['bus', 'model'].forEach((key) => {
                 if (!config[key]) {
                     throw new Error(
-                        'cannot initialise job manager widget without params "bus", "model", and "viewResultsFunction"'
+                        'cannot initialise job manager widget without params "bus" and "model"'
                     );
                 }
                 this[key] = config[key];
             });
+            // an object containing event handlers, categorised by event name
             this.handlers = {};
+            // bus listeners, indexed by job ID then message type
+            this.listeners = {};
+        }
+
+        _isValidEvent(event) {
+            return event && validOutgoingMessageTypes.concat('modelUpdate').includes(event);
         }
 
         /**
-         * Add one or more update handlers to the job manager; these are executed when
-         * a job is updated in the model or when `runUpdateHandlers` is executed.
-         * They should take two arguments, the cell model and an array of jobs.
+         * Add one or more handlers to the job manager; these are executed when one of the
+         * valid job-related events occurs (job-related message received, model updated)
+         * or when `runHandler` is executed.
          *
+         * By default, the handler functions receive the jobManager context as
+         * first argument and any additional arguments passed in by the caller
+         * (e.g. the message and job ID in the case of job listeners)
+         *
+         * @param {string} event - event that triggers the handler
          * @param {object} handlerObject with the handler name as keys and the handler function as values
          */
 
-        addUpdateHandler(handlerObject) {
+        addHandler(event, handlerObject) {
+            if (!this._isValidEvent(event)) {
+                throw new Error(`addHandler: invalid event ${event} supplied`);
+            }
+
             if (
                 !handlerObject ||
-                Object.prototype.toString.call(handlerObject) !== '[object Object]'
+                Object.prototype.toString.call(handlerObject) !== '[object Object]' ||
+                Object.keys(handlerObject).length === 0
             ) {
-                throw new Error('Arguments to addUpdateHandler must be of type object');
+                throw new Error(
+                    'addHandler: invalid handlerObject supplied (must be of type object)'
+                );
             }
+
             const errors = [];
+            if (!this.handlers[event]) {
+                this.handlers[event] = {};
+            }
+
             for (const [name, handlerFn] of Object.entries(handlerObject)) {
                 if (typeof handlerFn !== 'function') {
                     errors.push(name);
+                } else if (this.handlers[event][name]) {
+                    console.warn(`A handler with the name ${name} already exists`);
                 } else {
-                    this.handlers[name] = handlerFn;
+                    this.handlers[event][name] = handlerFn;
                 }
             }
             if (errors.length) {
@@ -64,38 +109,120 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
         }
 
         /**
-         * Remove an update handler
+         * Remove a handler
          *
+         * @param {string} event
          * @param {string} handlerName
          */
-        removeUpdateHandler(handlerName) {
-            const handlerFunction = this.handlers[handlerName];
-            delete this.handlers[handlerName];
-            return handlerFunction;
+        removeHandler(event, handlerName) {
+            if (this.handlers[event]) {
+                const handlerFunction = this.handlers[event][handlerName];
+                delete this.handlers[event][handlerName];
+                return handlerFunction;
+            }
         }
 
         /**
-         * Trigger the update handlers alphabetically by name.
+         * Trigger the ${event} handlers. Handlers are executed alphabetically by name.
          *
-         * @param {array} jobArray -- array of pertinent jobs
+         * By default, the handler functions receive the jobManager context as
+         * first argument and any additional arguments passed in by the caller
+         * (e.g. the message and job ID in the case of job listeners)
+         *
+         * @param {string} event
+         * @param  {...any} args
          */
-        runUpdateHandlers(jobArray) {
-            Object.keys(this.handlers)
+        runHandler(event, ...args) {
+            if (
+                !this._isValidEvent(event) ||
+                !this.handlers[event] ||
+                !Object.keys(this.handlers[event])
+            ) {
+                return;
+            }
+
+            Object.keys(this.handlers[event])
                 .sort()
                 .forEach((name) => {
                     try {
-                        this.handlers[name](this.model, jobArray);
+                        this.handlers[event][name](this, ...args);
                     } catch (err) {
                         console.warn(`Error executing handler ${name}:`, err);
                     }
                 });
         }
 
+        /* JOB LISTENERS */
+
         /**
-         * Execute a function to view job results.
+         * Add a bus listener for ${event} messages
+         *
+         * @param {string} type - a valid message type to listen for (see validOutgoingMessageTypes)
+         * @param {array} jobIdList - array of job IDs to apply the listener to
+         * @param {object} handlerObject (optional) - object with key(s) handler name and value(s) function to execute on receiving a message
          */
-        viewResults() {
-            return this.viewResultsFunction ? this.viewResultsFunction() : null;
+        addListener(type, jobIdList, handlerObject) {
+            if (!validOutgoingMessageTypes.includes(type)) {
+                throw new Error(`addListener: invalid listener ${type} supplied`);
+            }
+
+            if (Object.prototype.toString.call(jobIdList) !== '[object Array]') {
+                jobIdList = [jobIdList];
+            }
+
+            jobIdList.forEach((jobId) => {
+                if (!this.listeners[jobId]) {
+                    this.listeners[jobId] = {};
+                }
+
+                if (!this.listeners[jobId][type]) {
+                    this.listeners[jobId][type] = this.bus.listen({
+                        channel: {
+                            jobId: jobId,
+                        },
+                        key: {
+                            type: type,
+                        },
+                        handle: (message) => {
+                            this.runHandler(type, message, jobId);
+                        },
+                    });
+                }
+            });
+
+            // add the handler -- the message type is used as the event
+            if (handlerObject) {
+                this.addHandler(type, handlerObject);
+            }
+        }
+
+        /**
+         * Remove the listener for ${type} messages for a job ID
+         *
+         * @param {string} jobId
+         * @param {string} type - the type of the listener
+         */
+        removeListener(jobId, type) {
+            try {
+                this.bus.removeListener(this.listeners[jobId][type]);
+                delete this.listeners[jobId][type];
+            } catch (err) {
+                // do nothing
+            }
+        }
+
+        /**
+         * Remove all listeners associated with a certain job ID
+         * @param {string} jobId
+         */
+        removeJobListeners(jobId) {
+            if (this.listeners[jobId] && Object.keys(this.listeners[jobId]).length) {
+                Object.keys(this.listeners[jobId]).forEach((type) => {
+                    this.bus.removeListener(this.listeners[jobId][type]);
+                    delete this.listeners[jobId][type];
+                });
+                delete this.listeners[jobId];
+            }
         }
 
         /* JOB MANAGEMENT */
@@ -132,74 +259,22 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
 
         /**
          *
-         * @param {string} action - what action is to occur (cancel or retry)
-         * @param {array} statusList - array of statuses that the action applies to
-         * @param {array} jobList - array of job IDs
-         * @returns {object} arguments to create a modal to confirm or cancel the action
-         */
-
-        _generateDialogArgs(action, statusList, jobList) {
-            const statusIx = statusList.reduce((acc, curr) => {
-                acc[curr] = 1;
-                return acc;
-            }, {});
-
-            // for presentation, created and estimating jobs are listed as 'queued'
-            ['created', 'estimating'].forEach((status) => {
-                if (statusIx[status]) {
-                    delete statusIx[status];
-                    statusIx.queued = 1;
-                }
-            });
-
-            const jobLabelString = String.arrayToEnglish(
-                Object.keys(statusIx)
-                    .sort()
-                    .map((status) => Jobs.jobLabel({ status: status }))
-            );
-            const jobString = jobList.length === 1 ? '1 job' : jobList.length + ' jobs';
-            const ucfirstAction = String.capitalize(action);
-            return {
-                title: `${ucfirstAction} ${jobLabelString} jobs`,
-                body: div([
-                    p([
-                        `${ucfirstAction}ing all ${jobLabelString} jobs will terminate the processing of ${jobString}. `,
-                        'Any output objects already created will remain in your narrative and can be removed from the Data panel.',
-                    ]),
-                    statusList.includes('error')
-                        ? p(
-                              'Please note that jobs are rerun using the same parameters. Any jobs that failed due to issues with the input, such as misconfigured parameters or corrupted input data, are likely to throw the same errors when run again.'
-                          )
-                        : '',
-                    p(`${ucfirstAction} all ${jobLabelString} jobs?`),
-                ]),
-            };
-        }
-
-        /**
-         *
          * @param {object} args with keys
-         *                 action: the action to perform -- cancel or retry
-         *                 jobId: job to perform it on
+         *                 action {function} the action to perform
+         *                 jobId  {string} job to perform it on
+         *
          * @returns {boolean}
          */
         executeActionOnJobId(args) {
             const { action, jobId } = args;
             const jobState = this.model.getItem(`exec.jobs.byId.${jobId}`);
-
-            if (jobState && Jobs.canDo(action, jobState)) {
-                this.bus.emit(jobCommand[action], {
-                    jobId: jobId,
-                });
-                return true;
-            }
-            return false;
+            return action([jobState]);
         }
 
         /**
          *
          * @param {object} args with keys
-         *      action:        {string} action to perform (cancel or retry)
+         *      action:        {function} action to perform
          *      statusList:    {array}  list of statuses to perform it on
          *      validStatuses: {array}  list of statuses that it is valid to perform the action on
          *
@@ -209,22 +284,19 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
          */
         executeActionByJobStatus(args) {
             const { action, statusList, validStatuses } = args;
-
-            const jobsList = this.getJobIDsByStatus(statusList, validStatuses);
-            if (!jobsList || !jobsList.length) {
-                return Promise.resolve(false);
+            const jobIdList = this.getJobIDsByStatus(statusList, validStatuses);
+            if (!jobIdList || !jobIdList.length) {
+                return false;
             }
+            // return action(statusList, jobsList);
 
-            return UI.showConfirmDialog(
-                this._generateDialogArgs(action, statusList, jobsList)
-            ).then((confirmed) => {
-                if (!confirmed) {
-                    return false;
+            return JobMessages.showDialog({ action, statusList, jobIdList }).then((confirmed) => {
+                if (confirmed) {
+                    this.bus.emit(jobCommand[action], {
+                        jobIdList,
+                    });
                 }
-                this.bus.emit(jobCommand[action], {
-                    jobIdList: jobsList,
-                });
-                return true;
+                return confirmed;
             });
         }
 
@@ -273,6 +345,20 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
         }
 
         /**
+         * Cancel or retry a list of jobs
+         *
+         * @param {string} action - either 'cancel' or 'retry'
+         * @param {array} jobIdList
+         */
+        doJobAction(action, jobIdList) {
+            this.bus.emit(jobCommand[action].command, {
+                jobIdList,
+            });
+            // add the appropriate listener
+            this.addListener(jobCommand[action].listener, jobIdList);
+        }
+
+        /**
          * Update the model with the supplied jobState objects
          * @param {array} jobArray list of jobState objects to update the model with
          */
@@ -299,7 +385,7 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
                 }
             });
             this.model.setItem('exec.jobs', jobIndex);
-            this.runUpdateHandlers(jobArray);
+            this.runHandler('modelUpdate', jobArray);
             return this.model;
         }
     }

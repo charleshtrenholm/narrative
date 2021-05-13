@@ -4,11 +4,10 @@ define([
     'common/html',
     'common/jobs',
     'common/runtime',
-    './jobStateListRow',
     './jobActionDropdown',
-    'util/developerMode',
+    'util/jobLogViewer',
     'jquery-dataTables',
-], ($, Promise, html, Jobs, Runtime, JobStateListRow, JobActionDropdown, devMode) => {
+], ($, Promise, html, Jobs, Runtime, JobActionDropdown, JobLogViewer) => {
     'use strict';
 
     const t = html.tag,
@@ -18,6 +17,10 @@ define([
         th = t('th'),
         tbody = t('tbody'),
         div = t('div'),
+        ul = t('ul'),
+        li = t('li'),
+        button = t('button'),
+        span = t('span'),
         dataTablePageLength = 50,
         cssBaseClass = 'kb-job-status';
 
@@ -73,46 +76,44 @@ define([
         );
     }
 
-    function createTableRow(tableBody, id) {
-        const newRow = document.createElement('tr');
-        newRow.setAttribute('data-element-job-id', id);
-        newRow.classList.add(`${cssBaseClass}__row`);
-        return tableBody.appendChild(newRow);
-    }
-
-    // Convert the table to a datatable object to get functionality
-    function renderTable(container, rowCount) {
-        return $(container.querySelector('table')).dataTable({
-            searching: false,
-            pageLength: dataTablePageLength,
-            lengthChange: false,
-            columnDefs: [
-                {
-                    // action row should not be orderable
-                    targets: 2,
-                    orderable: false,
-                },
-                {
-                    // logs row should not be orderable
-                    targets: 3,
-                    orderable: false,
-                },
-            ],
-            fnDrawCallback: () => {
-                // Hide pagination controls if length is less than or equal to table length
-                if (rowCount <= dataTablePageLength) {
-                    $(container.querySelector('.dataTables_paginate')).hide();
-                }
+    function renderParams(params) {
+        // coerce to a string
+        return ul(
+            {
+                class: `${cssBaseClass}__param_list`,
             },
-        });
+            Object.keys(params)
+                .sort()
+                .map((key) => {
+                    return li(
+                        {
+                            class: `${cssBaseClass}__param_item`,
+                        },
+                        [
+                            span(
+                                {
+                                    class: `${cssBaseClass}__param_key`,
+                                },
+                                `${key}: `
+                            ),
+                            span(
+                                {
+                                    class: `${cssBaseClass}__param_value`,
+                                },
+                                `${params[key]}`
+                            ),
+                        ]
+                    );
+                })
+        );
     }
 
     /**
      * create a job state list instance
      *
      * the config should be an object with a property 'jobManager', which executes
-     * the job actions available as part of the job status table, and 'model', the
-     * Props object from the parent cell with information about job execution state
+     * the job actions available as part of the job status table, and 'toggleTab',
+     * a function used to view the results of finished jobs.
      *
      * @param {object} config
      * @returns jobStateList instance
@@ -120,15 +121,112 @@ define([
     function factory(config) {
         const widgetsById = {},
             bus = Runtime.make().bus(),
-            listeners = {},
-            { jobManager, model } = config,
-            developerMode = config.devMode || devMode.mode;
+            { jobManager, toggleTab } = config;
 
-        if (!model || !model.getItem('exec.jobs.byId')) {
+        if (!jobManager.model || !jobManager.model.getItem('exec.jobs.byId')) {
             throw new Error('Cannot start JobStateList without a jobs object in the config');
         }
 
-        let container, tableBody, dropdownWidget;
+        let container, dropdownWidget, dataTable;
+
+        // Convert the table to a datatable object to get functionality
+        function renderTable(rows) {
+            const rowCount = rows.length;
+            dataTable = $(container)
+                .find('table')
+                .dataTable({
+                    data: rows,
+                    rowId: (row) => {
+                        return 'job_' + row.job_id;
+                    },
+                    searching: false,
+                    pageLength: dataTablePageLength,
+                    lengthChange: false,
+                    columns: [
+                        {
+                            className: `${cssBaseClass}__cell--object`,
+                            render: (data, type, row) => {
+                                const params = jobManager.model.getItem(
+                                    `exec.jobs.params.${row.job_id}`
+                                );
+                                return params ? renderParams(params) : row.job_id;
+                            },
+                        },
+                        {
+                            className: `${cssBaseClass}__cell--status`,
+                            render: (data, type, row) => {
+                                const statusLabel = Jobs.jobLabel(row, true);
+                                return div(
+                                    {
+                                        dataToggle: 'tooltip',
+                                        dataPlacement: 'bottom',
+                                        title: statusLabel,
+                                    },
+                                    [
+                                        span({
+                                            class: `fa fa-circle ${cssBaseClass}__icon--${row.status}`,
+                                        }),
+                                        statusLabel,
+                                    ]
+                                );
+                            },
+                        },
+                        {
+                            className: `${cssBaseClass}__cell--action`,
+                            render: (data, type, row) => {
+                                const jobAction = Jobs.jobAction(row);
+                                if (!jobAction) {
+                                    return '';
+                                }
+                                const jsActionString = jobAction.replace(/ /g, '-');
+                                return button(
+                                    {
+                                        role: 'button',
+                                        dataTarget: row.job_id,
+                                        dataAction: jsActionString,
+                                        dataElement: 'job_action_button',
+                                        class: `${cssBaseClass}__cell_action--${jsActionString}`,
+                                    },
+                                    jobAction
+                                );
+                            },
+                        },
+                        {
+                            className: `${cssBaseClass}__cell--log-view`,
+                            render: () => {
+                                return div(
+                                    {
+                                        class: `${cssBaseClass}__log_link`,
+                                        role: 'button',
+                                        dataToggle: 'vertical-collapse-after',
+                                    },
+                                    ['Status details']
+                                );
+                            },
+                            orderable: false,
+                        },
+                    ],
+                    fnDrawCallback: () => {
+                        // Hide pagination controls if length is less than or equal to table length
+                        if (rowCount <= dataTablePageLength) {
+                            $(container).find('.dataTables_paginate').hide();
+                        }
+                    },
+                });
+        }
+
+        /**
+         * Update the table with a new jobState object
+         * @param {object} jobState
+         */
+        function updateJobStatusInTable(jobState) {
+            // select the appropriate row
+            dataTable
+                .DataTable()
+                .row('#job_' + jobState.job_id)
+                .data(jobState)
+                .draw();
+        }
 
         /**
          * Execute an action for a single job
@@ -147,81 +245,145 @@ define([
                 target = el.getAttribute('data-target');
 
             if (['cancel', 'retry', 'go-to-results'].includes(action)) {
+                const jobState = jobManager.model.getItem(`exec.jobs.byId.${target}`);
+                if (!jobState) {
+                    return false;
+                }
+
                 if (action === 'go-to-results') {
                     // switch to results tab
-                    return jobManager.viewResults(target);
+                    return toggleTab('results');
                 }
-                return jobManager[`${action}Job`](target);
+
+                if (!Jobs.canDo(action, jobState)) {
+                    // make sure that the button is disabled so it cannot be clicked again
+                    e.target.disabled = true;
+                    return false;
+                }
+
+                jobManager.doJobAction(action, [target]);
+
+                e.target.disabled = true;
+                return true;
             }
         }
 
-        function startParamsListener(jobId) {
-            listeners[`params__${jobId}`] = bus.listen({
-                channel: {
-                    jobId: jobId,
+        function setUpListeners(jobs) {
+            jobManager.addHandler('modelUpdate', {
+                dropdown: () => {
+                    dropdownWidget.updateState();
                 },
-                key: {
-                    type: 'job-info',
+                table: (_, jobArray) => {
+                    jobArray.forEach((jobState) => updateJobStatusInTable(jobState));
                 },
-                handle: handleJobInfoUpdate,
             });
-        }
+            const runningJobs = [];
+            const paramsRequired = [];
+            const jobIdList = jobs.map((jobState) => {
+                if (!Jobs.isTerminalStatus(jobState.status)) {
+                    runningJobs.push(jobState.job_id);
+                }
+                if (!jobManager.model.getItem(`exec.jobs.params.${jobState.job_id}`)) {
+                    paramsRequired.push(jobState.job_id);
+                }
+                return jobState.job_id;
+            });
 
-        function startStatusListener(jobId) {
-            listeners[`status__${jobId}`] = bus.listen({
-                channel: {
-                    jobId: jobId,
-                },
-                key: {
-                    type: 'job-status',
-                },
-                handle: handleJobStatusUpdate,
-            });
-        }
+            if (runningJobs.length) {
+                jobManager.addHandler('job-canceled', { jobStateList_cancel: handleJobCancel });
+            }
+            if (jobIdList.length !== runningJobs.length) {
+                jobManager.addHandler('job-retried', { jobStateList_retry: handleJobRetry });
+            }
 
-        function startJobDoesNotExistListener(jobId) {
-            listeners[`doesNotExist__${jobId}`] = bus.listen({
-                channel: {
-                    jobId: jobId,
-                },
-                key: {
-                    type: 'job-does-not-exist',
-                },
-                handle: () => {
-                    ['params', 'status'].forEach((type) => {
-                        if (listeners[`${type}__${jobId}`]) {
-                            bus.removeListener(listeners[`${type}__${jobId}`]);
-                            delete listeners[`${type}__${jobId}`];
-                        }
-                    });
-                    handleJobStatusUpdate({
-                        jobState: {
-                            job_id: jobId,
-                            status: 'does_not_exist',
-                            created: 0,
-                        },
-                    });
-                },
+            jobManager.addListener('job-does-not-exist', jobIdList, {
+                jobStateList_dne: handleJobDoesNotExist,
             });
+
+            if (paramsRequired.length) {
+                jobManager.addListener('job-info', paramsRequired, {
+                    jobStateList_info: handleJobInfo,
+                });
+                bus.emit('request-job-info', {
+                    jobIdList: paramsRequired,
+                });
+            }
+
+            if (runningJobs.length) {
+                jobManager.addListener('job-status', runningJobs, {
+                    jobStateList_status: handleJobStatusUpdate,
+                });
+                bus.emit('request-job-status', {
+                    jobIdList: runningJobs,
+                });
+            }
         }
 
         /**
          * parse and update the row with job info
-         * @param {Object} message
+         * @param {object} message
          */
-        function handleJobInfoUpdate(message) {
-            if (message.jobId && message.jobInfo && widgetsById[message.jobId]) {
-                widgetsById[message.jobId].updateParams(message.jobInfo);
-                bus.removeListener(listeners[`params__${message.jobId}`]);
-                delete listeners[`params__${message.jobId}`];
+        function handleJobInfo(_, message) {
+            const jobId = message.jobId;
+            if (!jobId || !message.jobInfo || !Jobs.isValidJobInfoObject(message.jobInfo)) {
+                return;
             }
+            jobManager.removeListener(jobId, 'job-info');
+            jobManager.model.setItem(`exec.jobs.params.${jobId}`, message.jobInfo.job_params[0]);
+            // call invalidate to remove the DataTables cache for the row
+            // otherwise the orthogonal data will not refresh
+            dataTable
+                .DataTable()
+                .row('#job_' + jobId)
+                .invalidate()
+                .draw();
+        }
+
+        function handleJobCancel(_, message) {
+            const jobId = message.jobId;
+            // request the job status
+            bus.emit('request-job-status', {
+                jobId: jobId,
+            });
+            // remove the cancel listeners
+            jobManager.removeListener(message.jobId, 'job-canceled');
+        }
+
+        function handleJobRetry(_, message) {
+            const jobId = message.jobId,
+                newJobId = message.newJobId;
+
+            // remove all listeners for the original job
+            jobManager.removeJobListeners(jobId);
+
+            // copy over the params
+            jobManager.model.setItem(
+                `exec.jobs.params.${newJobId}`,
+                jobManager.model.getItem(`exec.jobs.params.${jobId}`)
+            );
+
+            // request the job status for the new job
+            jobManager.addListener('job-status', [jobId]);
+            bus.emit('request-job-status', {
+                jobId: newJobId,
+            });
+        }
+
+        function handleJobDoesNotExist(_, message) {
+            const jobId = message.jobId;
+            jobManager.removeJobListeners(jobId);
+            handleJobStatusUpdate(_, {
+                job_id: jobId,
+                status: 'does_not_exist',
+                created: 0,
+            });
         }
 
         /**
          * Pass the job state to all row widgets
          * @param {Object} message
          */
-        function handleJobStatusUpdate(message) {
+        function handleJobStatusUpdate(_, message) {
             const jobState = message.jobState;
             if (!Jobs.isValidJobStateObject(jobState)) {
                 return;
@@ -230,50 +392,70 @@ define([
             const jobId = jobState.job_id;
             const status = jobState.status;
 
-            // remove listeners if appropriate
-            if (listeners[`doesNotExist__${jobId}`]) {
-                bus.removeListener(listeners[`doesNotExist__${jobId}`]);
-                delete listeners[`doesNotExist__${jobId}`];
-            }
+            jobManager.removeListener(jobId, 'job-does-not-exist');
+
             if (Jobs.isTerminalStatus(status)) {
-                bus.removeListener(listeners[`status__${jobId}`]);
-                delete listeners[`status__${jobId}`];
+                jobManager.removeListener(jobId, 'job-status');
             }
 
             // check if the status has changed; if not, ignore this update
-            const previousStatus = model.getItem(`exec.jobs.byId.${jobId}.status`);
+            const previousStatus = jobManager.model.getItem(`exec.jobs.byId.${jobId}.status`);
             if (status === previousStatus) {
                 return;
             }
 
-            // otherwise, update the model using the jobState object
             jobManager.updateModel([jobState]);
-
-            if (widgetsById[jobId]) {
-                // update the row widget
-                widgetsById[jobId].updateState(jobState);
-            }
             dropdownWidget.updateState();
+            updateJobStatusInTable(jobState);
         }
 
-        /**
-         * Creates a job state widget and puts it in the widgetsById object, keyed by the jobId.
-         *
-         * @param {object} jobState  -- jobState object, containing jobID, status, etc.
-         * @param {int}    jobIndex
-         * @returns {Promise} started job row instance
-         */
+        function showHideChildRow(e) {
+            const $currentRow = $(e.target).closest('tr');
+            const $table = $(e.target).closest('table');
+            const $dtTable = $table.DataTable();
+            const dtRow = $dtTable.row($currentRow);
+            const jobState = dtRow.data();
 
-        function createJobStateListRowWidget(jobState, jobIndex) {
-            widgetsById[jobState.job_id] = JobStateListRow.make();
-            // this returns a promise
-            return widgetsById[jobState.job_id].start({
-                node: createTableRow(tableBody, jobState.job_id),
-                jobState: jobState,
-                // this will be replaced once the job-info call runs
-                name: jobState.description || jobState.job_id || 'Child Job ' + (jobIndex + 1),
-                clickAction: doSingleJobAction,
+            // remove the existing row selection
+            $table
+                .find(`.${cssBaseClass}__row--selected`)
+                .removeClass(`${cssBaseClass}__row--selected`);
+            // select the current row
+            $currentRow.addClass(`${cssBaseClass}__row--selected`);
+
+            if (dtRow.child.isShown()) {
+                // This row is already open - close it
+                dtRow.child.hide();
+                $currentRow.removeClass('vertical_collapse--open');
+                if (widgetsById[jobState.job_id]) {
+                    widgetsById[jobState.job_id].stop();
+                }
+                dtRow.child.remove();
+                return Promise.resolve();
+            }
+
+            // create the child row contents, add to the child row, and show it
+            const str = div({
+                class: `${cssBaseClass}__log_container`,
+                dataElement: 'job-log-container',
             });
+            dtRow.child(str).show();
+
+            // add the log widget to the next `tr` element
+            widgetsById[jobState.job_id] = JobLogViewer.make({ jobManager, showHistory: true });
+            return Promise.try(() => {
+                widgetsById[jobState.job_id].start({
+                    node: $currentRow.next().find('[data-element="job-log-container"]')[0],
+                    jobId: dtRow.data().job_id,
+                    jobState: dtRow.data(),
+                });
+            })
+                .then(() => {
+                    $currentRow.addClass('vertical_collapse--open');
+                })
+                .catch((err) => {
+                    console.error(err);
+                });
         }
 
         /**
@@ -289,11 +471,12 @@ define([
                 throw new Error('start argument must have these keys: ' + requiredArgs.join(', '));
             }
 
-            const indexedJobs = model.getItem('exec.jobs.byId');
+            const indexedJobs = jobManager.model.getItem('exec.jobs.byId');
             if (!indexedJobs || !Object.keys(indexedJobs).length) {
                 throw new Error('Must provide at least one job to show the job state list');
             }
 
+            const jobs = Object.values(indexedJobs);
             container = args.node;
             container.innerHTML = [
                 div({
@@ -302,53 +485,55 @@ define([
                 createTable(),
             ].join('\n');
 
-            tableBody = container.querySelector('tbody');
-            const jobs = Object.values(indexedJobs);
-
-            return Promise.all(
-                jobs.map((jobState, index) => {
-                    createJobStateListRowWidget(jobState, index);
-                })
-            )
-                .then(() => {
-                    // start the dropdown widget
-                    dropdownWidget = JobActionDropdown.make(config);
-                    return dropdownWidget.start({
-                        node: container.querySelector(`.${cssBaseClass}__dropdown_container`),
-                    });
-                })
-                .then(() => {
-                    renderTable(container, jobs.length);
-
-                    jobs.forEach((jobState) => {
-                        startStatusListener(jobState.job_id);
-                        startJobDoesNotExistListener(jobState.job_id);
-                        // populate the job params
-                        startParamsListener(jobState.job_id);
-                        bus.emit('request-job-info', {
-                            jobId: jobState.job_id,
-                        });
-                    });
+            return Promise.try(() => {
+                // start the dropdown widget
+                dropdownWidget = JobActionDropdown.make({
+                    jobManager,
                 });
+                return dropdownWidget.start({
+                    node: container.querySelector(`.${cssBaseClass}__dropdown_container`),
+                });
+            }).then(() => {
+                renderTable(jobs);
+
+                container.querySelector('tbody').onclick = (e) => {
+                    e.stopPropagation();
+                    const $currentButton = $(e.target).closest(
+                        '[data-element="job_action_button"]'
+                    );
+                    const $currentRow = $(e.target).closest('tr.odd, tr.even');
+                    if (!$currentRow[0] && !$currentButton[0]) {
+                        return Promise.resolve();
+                    }
+                    if ($currentButton[0]) {
+                        return Promise.resolve(doSingleJobAction(e));
+                    }
+                    return showHideChildRow(e);
+                };
+
+                setUpListeners(jobs);
+            });
         }
 
         function stop() {
             return Promise.try(() => {
-                bus.removeListeners(Object.keys(listeners));
-                Object.keys(listeners).forEach((key) => {
-                    delete listeners[key];
-                });
                 dropdownWidget.stop();
-            });
-        }
 
-        if (developerMode) {
-            return {
-                start,
-                stop,
-                listeners,
-                model,
-            };
+                jobManager.removeHandler('modelUpdate', 'dropdown');
+                jobManager.removeHandler('modelUpdate', 'table');
+
+                Object.keys(jobManager.model.getItem('exec.jobs.byId')).forEach((jobId) => {
+                    ['cancel', 'cancel-error', 'info', 'does-not-exist'].forEach((type) => {
+                        jobManager.removeListener(jobId, `job-${type}`);
+                    });
+                });
+                // remove the other handlers
+                jobManager.removeHandler('job-canceled', 'jobStateList_cancel');
+                jobManager.removeHandler('job-cancel-error', 'jobStateList_cancel');
+                jobManager.removeHandler('job-info', 'jobStateList_info');
+                jobManager.removeHandler('job-status', 'jobStateList_status');
+                jobManager.removeHandler('job-does-not-exist', 'jobStateList_dne');
+            });
         }
 
         return {
@@ -361,6 +546,7 @@ define([
         make: function (config) {
             return factory(config);
         },
-        cssBaseClass: cssBaseClass,
+        cssBaseClass,
+        createTable,
     };
 });
