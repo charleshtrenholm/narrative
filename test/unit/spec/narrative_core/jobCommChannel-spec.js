@@ -160,15 +160,15 @@ define(['jobCommChannel', 'base/js/namespace', 'common/runtime', 'testUtil'], (
                     options: {
                         first_line: 2000,
                         job_id: 'overridden!',
-                        latest_only: true,
+                        latest: true,
                     },
                 },
                 expected: {
-                    request_type: 'job_logs_latest',
+                    request_type: 'job_logs',
                     job_id: 'overridden!',
                     parent_job_id: 'none',
                     first_line: 2000,
-                    latest_only: true,
+                    latest: true,
                 },
             },
             {
@@ -410,7 +410,6 @@ define(['jobCommChannel', 'base/js/namespace', 'common/runtime', 'testUtil'], (
         const errCases = {
             cancel_job: 'job-cancel-error',
             job_logs: 'job-log-deleted',
-            job_logs_latest: 'job-log-deleted',
             job_status: 'job-status-error',
         };
 

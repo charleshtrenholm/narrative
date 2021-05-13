@@ -125,8 +125,6 @@ define([
 
                 // Fetches job logs from kernel.
                 'request-job-log': JOB_LOGS,
-                // Fetches most recent job logs from kernel.
-                'request-job-log-latest': JOB_LOGS_LATEST,
             };
 
             for (const [key, value] of Object.entries(requestTranslation)) {
@@ -355,7 +353,6 @@ define([
                                 });
                                 break;
                             case 'job_logs':
-                            case 'job_logs_latest':
                                 this.sendBusMessage(JOB, jobId, 'job-log-deleted', {
                                     jobId: jobId,
                                     message: msgData.message,

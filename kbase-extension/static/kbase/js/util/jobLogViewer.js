@@ -530,7 +530,7 @@ define([
             bus.emit('request-job-log', {
                 jobId: jobId,
                 options: {
-                    latest_only: true,
+                    latest: true,
                 },
             });
         }
