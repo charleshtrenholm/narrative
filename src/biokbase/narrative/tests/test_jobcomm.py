@@ -254,9 +254,8 @@ class JobCommTestCase(unittest.TestCase):
             (0, 5000, True),
         ]
         for c in cases:
-            content = {"first_line": c[0], "num_lines": c[1]}
-            req_type = "job_logs_latest" if c[2] else "job_logs"
-            req = make_comm_msg(req_type, job_id, True, content)
+            content = {"first_line": c[0], "num_lines": c[1], "latest": c[2]}
+            req = make_comm_msg("job_logs", job_id, True, content)
             self.jc._get_job_logs(req)
             msg = self.jc._comm.last_message
             self.assertEqual("job_logs", msg["data"]["msg_type"])
@@ -407,7 +406,9 @@ class JobCommTestCase(unittest.TestCase):
     )
     def test_handle_latest_job_logs_msg(self):
         job_id = "5d64935ab215ad4128de94d6"
-        req = make_comm_msg("job_logs_latest", job_id, False, content={"num_lines": 10})
+        req = make_comm_msg(
+            "job_logs", job_id, False, content={"num_lines": 10, "latest": True}
+        )
         self.jc._handle_comm_message(req)
         msg = self.jc._comm.last_message
         self.assertEqual(msg["data"]["msg_type"], "job_logs")
