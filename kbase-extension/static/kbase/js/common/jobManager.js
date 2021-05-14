@@ -1,4 +1,4 @@
-define(['common/jobMessages'], (JobMessages) => {
+define(['common/jobMessages', 'common/jobs'], (JobMessages, Jobs) => {
     'use strict';
 
     const validOutgoingMessageTypes = [
@@ -28,7 +28,7 @@ define(['common/jobMessages'], (JobMessages) => {
         },
     };
 
-    class JobManager {
+    class JobManagerCore {
         /**
          * Initialise the job manager
          *
@@ -55,6 +55,19 @@ define(['common/jobMessages'], (JobMessages) => {
 
         _isValidEvent(event) {
             return event && validOutgoingMessageTypes.concat('modelUpdate').includes(event);
+        }
+
+        _isValidMessage(type, message) {
+            switch (type) {
+                case 'job-status':
+                    return message.jobId && Jobs.isValidJobStateObject(message.jobState);
+                case 'job-info':
+                    return message.jobId && Jobs.isValidJobInfoObject(message.jobInfo);
+                case type.indexOf('job') !== -1:
+                    return !!message.jobId;
+                default:
+                    return true;
+            }
         }
 
         /**
@@ -184,6 +197,9 @@ define(['common/jobMessages'], (JobMessages) => {
                             type: type,
                         },
                         handle: (message) => {
+                            if (!this._isValidMessage(type, message)) {
+                                return;
+                            }
                             this.runHandler(type, message, jobId);
                         },
                     });
@@ -389,6 +405,153 @@ define(['common/jobMessages'], (JobMessages) => {
             return this.model;
         }
     }
+
+    const defaultHandlerMixin = (Base) =>
+        class extends Base {
+            /**
+             * parse and update the row with job info
+             * @param {object} message
+             */
+            handleJobInfo(self, message) {
+                const jobId = message.jobId;
+                self.model.setItem(`exec.jobs.params.${jobId}`, message.jobInfo.job_params[0]);
+                self.removeListener(jobId, 'job-info');
+            }
+
+            handleJobCancel(self, message) {
+                const jobId = message.jobId;
+                // request the job status
+                self.bus.emit('request-job-status', {
+                    jobId,
+                });
+                // remove the cancel listeners
+                self.removeListener(message.jobId, 'job-canceled');
+            }
+
+            handleJobRetry(self, message) {
+                const jobId = message.jobId,
+                    newJobId = message.newJobId;
+
+                // remove all listeners for the original job
+                self.removeJobListeners(jobId);
+
+                // copy over the params
+                self.model.setItem(
+                    `exec.jobs.params.${newJobId}`,
+                    self.model.getItem(`exec.jobs.params.${jobId}`)
+                );
+
+                // request job updates for the new job
+                self.addListener('job-status', [newJobId]);
+                self.bus.emit('request-job-update', {
+                    jobId: newJobId,
+                });
+            }
+
+            handleJobDoesNotExist(self, message) {
+                const jobId = message.jobId;
+                self.handleJobStatus(self, {
+                    job_id: jobId,
+                    status: 'does_not_exist',
+                    created: null,
+                });
+                self.removeJobListeners(jobId);
+            }
+
+            /**
+             * Pass the job state to all row widgets
+             * @param {Object} message
+             */
+            handleJobStatus(self, message) {
+                const jobState = message.jobState;
+                const jobId = jobState.job_id;
+                const status = jobState.status;
+
+                self.removeListener(jobId, 'job-does-not-exist');
+
+                if (Jobs.isTerminalStatus(status)) {
+                    self.removeListener(jobId, 'job-status');
+                    self.bus.emit('request-job-completion', {
+                        jobId,
+                    });
+                }
+
+                // check if the status has changed; if not, ignore this update
+                const previousStatus = self.model.getItem(`exec.jobs.byId.${jobId}.status`);
+                if (status === previousStatus) {
+                    return;
+                }
+                // otherwise, update the state
+                self.updateModel([jobState]);
+            }
+
+            setDefaultHandlers() {
+                const defaultHandlers = {
+                    'job-canceled': this.handleJobCancel,
+                    'job-does-not-exist': this.handleJobDoesNotExist,
+                    // 'job-error': this.ohShit,
+                    'job-info': this.handleJobInfo,
+                    // 'job-logs': this.ohShit,
+                    'job-retried': this.handleJobRetry,
+                    'job-status': this.handleJobStatus,
+                };
+
+                Object.keys(defaultHandlers).forEach((event) => {
+                    this.addHandler(event, {
+                        __default: defaultHandlers[event],
+                    });
+                }, this);
+            }
+        };
+
+    const BatchInitMixin = (Base) =>
+        class extends Base {
+            /**
+             * set up the job manager to handle a batch job
+             *
+             * @param {object} batchJob - with keys
+             *        {string} parent_job_id
+             *        {array}  child_job_ids
+             */
+            initBatchJob(batchJob) {
+                const { parent_job_id, child_job_ids } = batchJob;
+
+                if (
+                    !parent_job_id ||
+                    !child_job_ids ||
+                    Object.prototype.toString.call(child_job_ids) !== '[object Array]' ||
+                    !child_job_ids.length
+                ) {
+                    throw new Error(
+                        'Batch job must have a parent job ID and at least one child job ID'
+                    );
+                }
+
+                this.setDefaultHandlers();
+                this.addListener('job-does-not-exist', child_job_ids);
+
+                this.addListener('job-status', child_job_ids);
+
+                // initialise `exec.jobs` with the new child jobs
+                this.model.setItem(
+                    'exec.jobs',
+                    Jobs.jobArrayToIndexedObject(
+                        child_job_ids.map((id) => {
+                            return { job_id: id, status: 'created' };
+                        })
+                    )
+                );
+
+                // request updates on the child jobs
+                this.bus.emit('request-job-update', {
+                    jobIdList: child_job_ids,
+                });
+
+                // TODO: what to do about parent?
+            }
+        };
+
+    class JobManager extends BatchInitMixin(defaultHandlerMixin(JobManagerCore)) {}
 
     return JobManager;
 });

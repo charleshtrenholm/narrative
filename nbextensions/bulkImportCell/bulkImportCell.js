@@ -24,7 +24,6 @@ define([
     'common/cellComponents/tabs/jobStatus/jobStatusTab',
     'common/cellComponents/tabs/results/resultsTab',
     './bulkImportCellStates',
-    './testAppObj',
 ], (
     Uuid,
     Config,
@@ -51,7 +50,6 @@ define([
     JobStatusTabWidget,
     ResultsWidget,
     States,
-    TestAppObj
 ) => {
     'use strict';
     const CELL_TYPE = 'app-bulk-import';
@@ -230,13 +228,13 @@ define([
         const model = Props.make({
                 // TODO: Remove and replace with the commented-out line below
                 // once the backend is hooked up
-                data: Object.assign(
-                    {},
-                    Utils.getMeta(cell, 'bulkImportCell'),
-                    // execution data
-                    { exec: TestAppObj.exec }
-                ),
-                // data: Utils.getMeta(cell, 'bulkImportCell'),
+                // data: Object.assign(
+                //     {},
+                //     Utils.getMeta(cell, 'bulkImportCell'),
+                //     // execution data
+                //     // { exec: TestAppObj.exec }
+                // ),
+                data: Utils.getMeta(cell, 'bulkImportCell'),
                 onUpdate: function (props) {
                     Utils.setMeta(cell, 'bulkImportCell', props.getRawObject());
                 },
@@ -479,7 +477,9 @@ define([
         function handleRunStatus(message) {
             switch (message.event) {
                 case 'launched_job_batch':
-                    jobManager.updateModel(message.child_job_ids);
+                    // remove any existing jobs
+                    jobManager.initBatchJob(message);
+                    // jobManager.updateModel(message.child_job_ids);
                     updateState('queued');
                     break;
                 case 'error':
@@ -778,6 +778,7 @@ define([
             busEventManager.add(runStatusListener);
             cell.execute();
             updateState('launching');
+            controlPanel.setExecMessage('Launching job...');
         }
 
         /**
@@ -808,11 +809,12 @@ define([
                     return;
                 }
                 busEventManager.remove(runStatusListener);
-                updateEditingState();
             } else {
                 await jobManager.cancelJobsByStatus(['created', 'estimating', 'queued', 'running']);
-                updateEditingState();
             }
+            updateEditingState();
+            controlPanel.setExecMessage('Job cancelled');
+            // TODO: if on results or status tab, switch to Configure
         }
 
         /**

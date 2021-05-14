@@ -4,6 +4,9 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
     const div = html.tag('div'),
         p = html.tag('p');
 
+    const outputObjectsBlurb =
+        'Any output objects already created will remain in your narrative and can be removed from the Data panel.';
+
     /**
      * @param {object} args with keys
      *      {string} action - what action is to occur (cancel or retry)
@@ -39,7 +42,7 @@ define(['common/html', 'common/jobs', 'common/ui', 'util/string'], (html, Jobs, 
             body: div([
                 p([
                     `${ucfirstAction}ing all ${jobLabelString} jobs will terminate the processing of ${jobString}. `,
-                    'Any output objects already created will remain in your narrative and can be removed from the Data panel.',
+                    outputObjectsBlurb,
                 ]),
                 statusList.includes('error')
                     ? p(

@@ -136,6 +136,9 @@ define([
         sendBusMessage(channelName, channelId, msgType, message) {
             const channel = {};
             channel[channelName] = channelId;
+            if (msgType !== 'job-status') {
+                console.log(`sending bus message: ${channelName} ${channelId} ${msgType}`);
+            }
             this.runtime.bus().send(JSON.parse(JSON.stringify(message)), {
                 channel: channel,
                 key: {
@@ -198,7 +201,7 @@ define([
                 if (message.options) {
                     msg = Object.assign({}, msg, message.options);
                 }
-
+                console.log(`sending comm message: ${COMM_NAME} ${msgType}`);
                 this.comm.send(msg);
                 resolve();
             }).catch((err) => {
@@ -374,26 +377,34 @@ define([
                         switch (msgData.source) {
                             case 'cancel_job':
                                 this.sendBusMessage(JOB, jobId, 'job-cancel-error', {
-                                    jobId: jobId,
+                                    jobId,
                                     message: msgData.message,
+                                });
+                                this.sendBusMessage(JOB, jobId, 'job-canceled', {
+                                    jobId,
+                                    error: msgData.message,
                                 });
                                 break;
                             case 'job_logs':
                             case 'job_logs_latest':
                                 this.sendBusMessage(JOB, jobId, 'job-log-deleted', {
-                                    jobId: jobId,
+                                    jobId,
                                     message: msgData.message,
                                 });
-                                break;
-                            case 'job_status':
-                                this.sendBusMessage(JOB, jobId, 'job-status-error', {
-                                    jobId: jobId,
-                                    message: msgData.message,
+                                this.sendBusMessage(JOB, jobId, 'job-logs', {
+                                    jobId,
+                                    error: msgData.message,
                                 });
                                 break;
+                            // case 'job_status':
+                            //     this.sendBusMessage(JOB, jobId, 'job-status-error', {
+                            //         jobId: jobId,
+                            //         message: msgData.message,
+                            //     });
+                            //     break;
                             default:
                                 this.sendBusMessage(JOB, jobId, 'job-error', {
-                                    jobId: jobId,
+                                    jobId,
                                     message: msgData.message,
                                     request: msgData.source,
                                 });

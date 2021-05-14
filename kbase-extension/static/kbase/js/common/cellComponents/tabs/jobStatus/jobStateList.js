@@ -277,27 +277,11 @@ define([
                     jobArray.forEach((jobState) => updateJobStatusInTable(jobState));
                 },
             });
-            const runningJobs = [];
             const paramsRequired = [];
-            const jobIdList = jobs.map((jobState) => {
-                if (!Jobs.isTerminalStatus(jobState.status)) {
-                    runningJobs.push(jobState.job_id);
-                }
+            jobs.forEach((jobState) => {
                 if (!jobManager.model.getItem(`exec.jobs.params.${jobState.job_id}`)) {
                     paramsRequired.push(jobState.job_id);
                 }
-                return jobState.job_id;
-            });
-
-            if (runningJobs.length) {
-                jobManager.addHandler('job-canceled', { jobStateList_cancel: handleJobCancel });
-            }
-            if (jobIdList.length !== runningJobs.length) {
-                jobManager.addHandler('job-retried', { jobStateList_retry: handleJobRetry });
-            }
-
-            jobManager.addListener('job-does-not-exist', jobIdList, {
-                jobStateList_dne: handleJobDoesNotExist,
             });
 
             if (paramsRequired.length) {
@@ -308,15 +292,6 @@ define([
                     jobIdList: paramsRequired,
                 });
             }
-
-            if (runningJobs.length) {
-                jobManager.addListener('job-status', runningJobs, {
-                    jobStateList_status: handleJobStatusUpdate,
-                });
-                bus.emit('request-job-status', {
-                    jobIdList: runningJobs,
-                });
-            }
         }
 
         /**
@@ -325,88 +300,11 @@ define([
          */
         function handleJobInfo(_, message) {
             const jobId = message.jobId;
-            if (!jobId || !message.jobInfo || !Jobs.isValidJobInfoObject(message.jobInfo)) {
-                return;
-            }
-            jobManager.removeListener(jobId, 'job-info');
-            jobManager.model.setItem(`exec.jobs.params.${jobId}`, message.jobInfo.job_params[0]);
-            // call invalidate to remove the DataTables cache for the row
-            // otherwise the orthogonal data will not refresh
             dataTable
                 .DataTable()
                 .row('#job_' + jobId)
                 .invalidate()
                 .draw();
-        }
-
-        function handleJobCancel(_, message) {
-            const jobId = message.jobId;
-            // request the job status
-            bus.emit('request-job-status', {
-                jobId: jobId,
-            });
-            // remove the cancel listeners
-            jobManager.removeListener(message.jobId, 'job-canceled');
-        }
-
-        function handleJobRetry(_, message) {
-            const jobId = message.jobId,
-                newJobId = message.newJobId;
-
-            // remove all listeners for the original job
-            jobManager.removeJobListeners(jobId);
-
-            // copy over the params
-            jobManager.model.setItem(
-                `exec.jobs.params.${newJobId}`,
-                jobManager.model.getItem(`exec.jobs.params.${jobId}`)
-            );
-
-            // request the job status for the new job
-            jobManager.addListener('job-status', [jobId]);
-            bus.emit('request-job-status', {
-                jobId: newJobId,
-            });
-        }
-
-        function handleJobDoesNotExist(_, message) {
-            const jobId = message.jobId;
-            jobManager.removeJobListeners(jobId);
-            handleJobStatusUpdate(_, {
-                job_id: jobId,
-                status: 'does_not_exist',
-                created: 0,
-            });
-        }
-
-        /**
-         * Pass the job state to all row widgets
-         * @param {Object} message
-         */
-        function handleJobStatusUpdate(_, message) {
-            const jobState = message.jobState;
-            if (!Jobs.isValidJobStateObject(jobState)) {
-                return;
-            }
-
-            const jobId = jobState.job_id;
-            const status = jobState.status;
-
-            jobManager.removeListener(jobId, 'job-does-not-exist');
-
-            if (Jobs.isTerminalStatus(status)) {
-                jobManager.removeListener(jobId, 'job-status');
-            }
-
-            // check if the status has changed; if not, ignore this update
-            const previousStatus = jobManager.model.getItem(`exec.jobs.byId.${jobId}.status`);
-            if (status === previousStatus) {
-                return;
-            }
-
-            jobManager.updateModel([jobState]);
-            dropdownWidget.updateState();
-            updateJobStatusInTable(jobState);
         }
 
         function showHideChildRow(e) {
@@ -496,21 +394,22 @@ define([
             }).then(() => {
                 renderTable(jobs);
 
-                container.querySelector('tbody').onclick = (e) => {
-                    e.stopPropagation();
-                    const $currentButton = $(e.target).closest(
-                        '[data-element="job_action_button"]'
-                    );
-                    const $currentRow = $(e.target).closest('tr.odd, tr.even');
-                    if (!$currentRow[0] && !$currentButton[0]) {
-                        return Promise.resolve();
-                    }
-                    if ($currentButton[0]) {
-                        return Promise.resolve(doSingleJobAction(e));
-                    }
-                    return showHideChildRow(e);
-                };
-
+                container.querySelectorAll('tbody tr.odd, tbody tr.even').forEach((el) => {
+                    el.onclick = (e) => {
+                        e.stopPropagation();
+                        const $currentButton = $(e.target).closest(
+                            '[data-element="job_action_button"]'
+                        );
+                        const $currentRow = $(e.target).closest('tr.odd, tr.even');
+                        if (!$currentRow[0] && !$currentButton[0]) {
+                            return Promise.resolve();
+                        }
+                        if ($currentButton[0]) {
+                            return Promise.resolve(doSingleJobAction(e));
+                        }
+                        return showHideChildRow(e);
+                    };
+                });
                 setUpListeners(jobs);
             });
         }
@@ -523,16 +422,13 @@ define([
                 jobManager.removeHandler('modelUpdate', 'table');
 
                 Object.keys(jobManager.model.getItem('exec.jobs.byId')).forEach((jobId) => {
-                    ['cancel', 'cancel-error', 'info', 'does-not-exist'].forEach((type) => {
+                    ['canceled', 'cancel-error', 'info', 'does-not-exist'].forEach((type) => {
                         jobManager.removeListener(jobId, `job-${type}`);
                     });
                 });
                 // remove the other handlers
-                jobManager.removeHandler('job-canceled', 'jobStateList_cancel');
-                jobManager.removeHandler('job-cancel-error', 'jobStateList_cancel');
                 jobManager.removeHandler('job-info', 'jobStateList_info');
                 jobManager.removeHandler('job-status', 'jobStateList_status');
-                jobManager.removeHandler('job-does-not-exist', 'jobStateList_dne');
             });
         }
 
