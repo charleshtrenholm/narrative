@@ -266,6 +266,9 @@ define(['common/jobMessages', 'common/jobs'], (JobMessages, Jobs) => {
             }
 
             const jobsByStatus = this.model.getItem('exec.jobs.byStatus');
+            if (!jobsByStatus || !Object.keys(jobsByStatus).length) {
+                return null;
+            }
             return statusList
                 .map((status) => {
                     return jobsByStatus[status] ? Object.keys(jobsByStatus[status]) : [];
@@ -548,6 +551,46 @@ define(['common/jobMessages', 'common/jobs'], (JobMessages, Jobs) => {
                 });
 
                 // TODO: what to do about parent?
+            }
+
+            getFsmStateFromJobs() {
+
+                const jobsByStatus = this.model.getItem(`exec.jobs.byStatus`)
+                if (!jobsByStatus || !Object.keys(jobsByStatus).length) {
+                    return null;
+                }
+
+                const statuses = {}
+
+                Object.keys(jobsByStatus).forEach((status) => {
+                    const nJobs = Object.keys(jobsByStatus[status]).length;
+                    // reduce down the queued states
+                    if (status === 'estimating' || status === 'created') {
+                        status = 'queued';
+                    }
+                    statuses[status] ? (statuses[status] += nJobs) : (statuses[status] = nJobs);
+                });
+
+                if (statuses.running || statuses.queued) {
+                    if (statuses.completed) {
+                        return 'appPartialComplete'
+                    }
+                    return 'inProgress'
+                }
+
+                if (Object.keys(statuses).length === 1) {
+                    if (statuses.terminated) {
+                        return 'appCanceled'
+                    }
+                    if (statuses.completed) {
+                        return 'appComplete'
+                    }
+                    if (statuses.error || statuses.does_not_exist) {
+                        return 'appError'
+                    }
+                }
+                // Erk!
+                return 'appComplete'
             }
         };
 

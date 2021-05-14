@@ -85,21 +85,8 @@ define([], () => {
                 },
             },
         },
-        // the main app is queued, no child apps have started yet
-        queued: {
-            ui: {
-                tab: tabState(
-                    ['viewConfigure', 'info', 'jobStatus'],
-                    ['viewConfigure', 'info', 'jobStatus', 'results']
-                ),
-                action: {
-                    name: 'cancel',
-                    disabled: false,
-                },
-            },
-        },
-        // apps are running, none are complete yet
-        running: {
+        // child jobs are queued or in progress, none completed
+        inProgress: {
             ui: {
                 tab: tabState(
                     ['viewConfigure', 'info', 'jobStatus'],

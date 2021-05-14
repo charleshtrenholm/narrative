@@ -479,8 +479,7 @@ define([
                 case 'launched_job_batch':
                     // remove any existing jobs
                     jobManager.initBatchJob(message);
-                    // jobManager.updateModel(message.child_job_ids);
-                    updateState('queued');
+                    updateState('inProgress');
                     break;
                 case 'error':
                     updateState('appError');
@@ -629,6 +628,12 @@ define([
                             )
                         );
                     },
+                    fsmUpdate: () => {
+                        const newState = jobManager.getFsmStateFromJobs()
+                        if (newState) {
+                            updateState(newState);
+                        }
+                    }
                 });
                 // populate the execMessage with the current job state
                 jobManager.runHandler('modelUpdate');
@@ -753,11 +758,13 @@ define([
                     break;
                 case 'reRunApp':
                     // TODO implement
-                    alert('re-running app');
+                    doTempRerunResetAppAction();
+                    // alert('re-running app');
                     break;
                 case 'resetApp':
                     // TODO implement
-                    alert('resetting app');
+                    doTempRerunResetAppAction();
+                    // alert('resetting app');
                     break;
                 case 'offline':
                     // TODO implement / test better
@@ -767,6 +774,17 @@ define([
                     alert(`Unknown command ${action}`);
                     break;
             }
+        }
+
+        /**
+         *
+         */
+        function doTempRerunResetAppAction() {
+            if (runStatusListener !== null) {
+                busEventManager.remove(runStatusListener);
+            }
+            updateEditingState();
+            controlPanel.setExecMessage('');
         }
 
         /**
