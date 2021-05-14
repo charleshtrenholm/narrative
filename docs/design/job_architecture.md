@@ -52,14 +52,10 @@ All the `request-job-*` requests take as arguments either a single job ID string
   * `jobId` - a string, the job id OR
   * `jobIdList` - an array of job IDs
   * `options` - an object, with attributes:
-    * `first_line` - the first line (0-indexed) to request
+    * `first_line` - the first line (0-indexed) to request (optional)
     * `num_lines` - the number of lines to request (will get back up to that many if there aren't more)
+    * `latest_only` - boolean (optional) whether to retrieve the most recent logs
 
-`request-job-log-latest` - request the latest several job log lines
-  * `jobId` - a string, the job id OR
-  * `jobIdList` - an array of job IDs
-  * `options` - an object, with attributes:
-    * `num_lines` - the number of lines to request (will get back up to that many if there aren't more)
 
 ### Usage Example
 The comm channel is used through the main Bus object that's instantiated through the global `Runtime` object. That needs to be included in the `define` statement for all AMD modules. The bus is then used with its `emit` function (you have the bus *emit* a message to its listeners), and any inputs are passed along with it.

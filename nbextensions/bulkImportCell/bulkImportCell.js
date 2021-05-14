@@ -49,7 +49,7 @@ define([
     InfoTabWidget,
     JobStatusTabWidget,
     ResultsWidget,
-    States,
+    States
 ) => {
     'use strict';
     const CELL_TYPE = 'app-bulk-import';

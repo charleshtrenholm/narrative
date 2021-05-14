@@ -521,77 +521,55 @@ define(['common/jobManager', 'common/jobs', 'common/props', 'common/ui', '/test/
             });
         });
 
-        // xdescribe('the viewResults function', () => {
-        //     it('can execute a function to view results', function () {
-        //         const jobManagerInstance = new JobManager({
-        //             model: this.model,
-        //             bus: this.bus,
-        //             viewResultsFunction: () => {
-        //                 console.error('Triggered!');
-        //             },
-        //             devMode: true,
-        //         });
+        describe('initBatchJob', () => {
+            beforeEach(function () {
+                this.jobManagerInstance = createJobManagerInstance(this);
+            });
 
-        //         spyOn(console, 'error');
-        //         jobManagerInstance.viewResults();
-        //         expect(console.error).toHaveBeenCalledWith('Triggered!');
-        //     });
-        // });
+            const invalidInput = [
+                {},
+                { parent_job: 12345 },
+                { parent_job_id: 12345, child_jobs: [] },
+                { parent_job_id: 12345, child_job_ids: [] },
+                { parent_job_id: 12345, child_job_ids: {} },
+            ];
 
-        //         it('cannot add listeners that are not in the correct format', function () {
-        //             expect(this.jobManagerInstance.listeners).toEqual({});
-        //             expect(() => {
-        //                 this.jobManagerInstance.addHandler('modelUpdate', { shout: { key: 'value' } });
-        //             }).toThrowError(
-        //                 /Handlers must be of type function. Recheck these handlers: shout/
-        //             );
-        //             expectHandlersDefined(this.jobManagerInstance, false, ['shout']);
-        //             expect(this.jobManagerInstance.handlers).toEqual({});
-        //         });
+            invalidInput.forEach((input) => {
+                it(`will not accept invalid input ${JSON.stringify(input)}`, function () {
+                    expect(() => {
+                        this.jobManagerInstance.initBatchJob(input);
+                    }).toThrowError(
+                        /Batch job must have a parent job ID and at least one child job ID/
+                    );
+                });
+            });
 
-        //         it('only adds valid handlers', function () {
-        //             expect(this.jobManagerInstance.handlers).toEqual({});
-        //             expect(() => {
-        //                 this.jobManagerInstance.addHandler('modelUpdate', {
-        //                     scream,
-        //                     shout,
-        //                     let_it_all: {},
-        //                     out: null,
-        //                 });
-        //             }).toThrowError(
-        //                 /Handlers must be of type function. Recheck these handlers: let_it_all, out/
-        //             );
-        //             expectHandlersDefined(this.jobManagerInstance, true, ['scream', 'shout']);
-        //             expectHandlersDefined(this.jobManagerInstance, false, ['let_it_all', 'out']);
-        //         });
-
-        //         const badArguments = [null, undefined, '', 0, 1.2345, [], [1, 2, 3, 4], () => {}];
-        //         badArguments.forEach((arg) => {
-        //             it(`does not accept args of type ${Object.prototype.toString.call(
-        //                 arg
-        //             )}`, function () {
-        //                 expect(() => {
-        //                     this.jobManagerInstance.addHandler('modelUpdate', arg);
-        //                 }).toThrowError(/Arguments to addHandler must be of type object/);
-        //             });
-        //         });
-        //     });
-
-        //     describe('removeHandler', () => {
-        //         it('can have handlers removed', function () {
-        //             this.jobManagerInstance.handlers.modelUpdate.scream = scream;
-        //             expect(this.jobManagerInstance.handlers.modelUpdate.scream).toEqual(jasmine.any(Function));
-        //             this.jobManagerInstance.removeHandler('modelUpdate', 'scream');
-        //             expectHandlersDefined(this.jobManagerInstance, false, ['scream']);
-        //         });
-
-        //         it('does not die if the handler name does not exist', function () {
-        //             expect(this.jobManagerInstance.handlers.modelUpdate.scream).toBeUndefined();
-        //             this.jobManagerInstance.removeHandler('modelUpdate', 'scream');
-        //             expectHandlersDefined(this.jobManagerInstance, false, ['scream']);
-        //         });
-        //     });
-        // })
+            it('replaces any existing job data with the new input', function () {
+                const childJobs = ['this', 'that', 'the other'];
+                expect(
+                    Object.keys(this.jobManagerInstance.model.getItem('exec.jobs.byId')).sort()
+                ).toEqual(
+                    JobsData.allJobs
+                        .map((job) => {
+                            return job.job_id;
+                        })
+                        .sort()
+                );
+                this.jobManagerInstance.initBatchJob({
+                    parent_job_id: 'something',
+                    child_job_ids: childJobs,
+                });
+                expect(this.jobManagerInstance.model.getItem('exec.jobs.byId').sort()).toEqual([
+                    'that',
+                    'the other',
+                    'this',
+                ]);
+                childJobs.forEach((jobId) => {
+                    expect(this.jobManagerInstance.listeners[jobId]['job-status']).toBeDefined();
+                });
+                // expect bus message 'request-job-update' to be sent
+            });
+        });
 
         xdescribe('job action functions', () => {
             beforeEach(function () {

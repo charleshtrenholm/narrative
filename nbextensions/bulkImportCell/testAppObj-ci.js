@@ -27,7 +27,16 @@ define(['./jobsData', 'common/jobs', 'json!./testAppObj.json'], (JobsData, Jobs,
         }
     });
 
-    TestAppObj.exec.jobs = Jobs.jobArrayToIndexedObject(jobData);
+    const runningJobs = [
+        '6094754594a50504ee237ad3',
+        '60947546a4bf5df208d5c6c0',
+        '60947548750aebe52f08d03f',
+        '609475496dfaa42013b5f618',
+    ].map((job) => {
+        return { status: 'running', created: 0, job_id: job };
+    });
+
+    TestAppObj.exec.jobs = Jobs.jobArrayToIndexedObject(jobData.concat(runningJobs));
     delete TestAppObj.exec.jobState;
 
     return {

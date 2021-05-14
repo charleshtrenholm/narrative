@@ -5,6 +5,6 @@ define([], () => {
     'use strict';
 
     return {
-        mode: false,
+        mode: true,
     };
 });

@@ -227,6 +227,11 @@ class JobComm:
             return job_state
         except ValueError:
             # kblogging.log_event(self._log, "lookup_job_state_error", {"err": str(e)})
+            self.send_comm_message("job_status", {
+                "status": "does_not_exist",
+                "created": 0,
+                "job_id": req.job_id,
+            })
             self.send_error_message("job_does_not_exist", req)
             self.send_comm_message(
                 "job_status",
