@@ -629,11 +629,11 @@ define([
                         );
                     },
                     fsmUpdate: () => {
-                        const newState = jobManager.getFsmStateFromJobs()
+                        const newState = jobManager.getFsmStateFromJobs();
                         if (newState) {
                             updateState(newState);
                         }
-                    }
+                    },
                 });
                 // populate the execMessage with the current job state
                 jobManager.runHandler('modelUpdate');

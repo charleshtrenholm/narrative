@@ -11,6 +11,24 @@
     &_body {
       border-bottom: 2px solid use-color('base-light');
       border-top: 2px solid use-color('base-light');
+
+      tr.odd,
+      tr.even {
+        border-bottom: 1px solid use-color('base-lightest');
+
+        &:hover {
+          background: use-color('disabled-light');
+        }
+
+        // .kb-job-status__row--selected
+        &--selected {
+          background: use-color('base-lightest');
+
+          &:hover {
+            background: use-color('primary-lighter');
+          }
+        }
+      }
     }
 
     &_head {
@@ -57,38 +75,6 @@
     }
   }
 
-  &__row {
-    border-bottom: 1px solid use-color('base-lightest');
-
-    &:hover {
-      background: use-color('disabled-light');
-    }
-
-    .kb-job-status__cell_action {
-      &--retry,
-      &--go-to-results {
-        @extend %kbase-button;
-
-        @include button-variant(use_color('primary'), use-color('primary-lightest'), transparent);
-      }
-
-      &--cancel {
-        @extend %kbase-button;
-
-        @include button-variant(use_color('error'), use_color('error-lightest'), transparent);
-      }
-    }
-
-    // .kb-job-status__row--selected
-    &--selected {
-      background: use-color('base-lightest');
-
-      &:hover {
-        background: use-color('primary-lighter');
-      }
-    }
-  }
-
   &__cell {
     &--status {
       text-transform: capitalize;
@@ -104,6 +90,21 @@
       @include table-cell;
 
       white-space: nowrap;
+    }
+
+    &_action {
+      &--retry,
+      &--go-to-results {
+        @extend %kbase-button;
+
+        @include button-variant(use_color('primary'), use-color('primary-lightest'), transparent);
+      }
+
+      &--cancel {
+        @extend %kbase-button;
+
+        @include button-variant(use_color('error'), use_color('error-lightest'), transparent);
+      }
     }
   }
 

@@ -554,13 +554,12 @@ define(['common/jobMessages', 'common/jobs'], (JobMessages, Jobs) => {
             }
 
             getFsmStateFromJobs() {
-
-                const jobsByStatus = this.model.getItem(`exec.jobs.byStatus`)
+                const jobsByStatus = this.model.getItem(`exec.jobs.byStatus`);
                 if (!jobsByStatus || !Object.keys(jobsByStatus).length) {
                     return null;
                 }
 
-                const statuses = {}
+                const statuses = {};
 
                 Object.keys(jobsByStatus).forEach((status) => {
                     const nJobs = Object.keys(jobsByStatus[status]).length;
@@ -573,24 +572,24 @@ define(['common/jobMessages', 'common/jobs'], (JobMessages, Jobs) => {
 
                 if (statuses.running || statuses.queued) {
                     if (statuses.completed) {
-                        return 'appPartialComplete'
+                        return 'appPartialComplete';
                     }
-                    return 'inProgress'
+                    return 'inProgress';
                 }
 
                 if (Object.keys(statuses).length === 1) {
                     if (statuses.terminated) {
-                        return 'appCanceled'
+                        return 'appCanceled';
                     }
                     if (statuses.completed) {
-                        return 'appComplete'
+                        return 'appComplete';
                     }
                     if (statuses.error || statuses.does_not_exist) {
-                        return 'appError'
+                        return 'appError';
                     }
                 }
                 // Erk!
-                return 'appComplete'
+                return 'appComplete';
             }
         };
 
