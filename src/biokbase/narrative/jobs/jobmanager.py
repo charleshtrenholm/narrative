@@ -277,10 +277,10 @@ class JobManager(object):
             job_states[job_id] = self.get_job(job_id).output_state(state)
         return job_states
 
-    def lookup_job_info(self, job_id):
+    def lookup_job_infos(self, job_ids: list) -> dict:
         """
         Will raise a NoJobException if job_id doesn't exist.
-        Sends the info over the comm channel as this packet:
+        Sends the info over the comm channel as these packets:
         {
             app_id: module/name,
             app_name: random string,
@@ -289,15 +289,17 @@ class JobManager(object):
             batch_id: string,
         }
         """
-        job = self.get_job(job_id)
-        info = {
-            "app_id": job.app_id,
-            "app_name": job.app_spec()["info"]["name"],
-            "job_id": job_id,
-            "job_params": job.params,
-            "batch_id": job.batch_id,
-        }
-        return info
+        infos = dict()
+        for job_id in job_ids:
+            job = self.get_job(job_id)
+            infos[job_id] = {
+                "app_id": job.app_id,
+                "app_name": job.app_spec()["info"]["name"],
+                "job_id": job_id,
+                "job_params": job.params,
+                "batch_id": job.batch_id,
+            }
+        return infos
 
     def lookup_all_job_states(self, ignore_refresh_flag=False):
         """
@@ -495,12 +497,6 @@ class JobManager(object):
             )
 
         return retry_results
-
-    def get_job_state(self, job_id: str) -> dict:
-        if job_id is None or job_id not in self._running_jobs:
-            raise ValueError(f"No job present with id {job_id}")
-        state = self._running_jobs[job_id]["job"].output_state()
-        return state
 
     def get_job_states(self, job_ids: List[str]) -> dict:
         checked_jobs = self._check_job_list(job_ids)

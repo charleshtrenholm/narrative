@@ -161,7 +161,7 @@ class Job(object):
             .get("narrative_cell_info", {})
             .get("cell_id", JOB_ATTR_DEFAULTS["cell_id"]),
             child_jobs=lambda: copy.deepcopy(
-                self._acc_state.get("child_jobs", JOB_ATTR_DEFAULTS["child_jobs"])
+                self.state().get("child_jobs", JOB_ATTR_DEFAULTS["child_jobs"])
             ),
             job_id=lambda: self._acc_state.get("job_id"),
             params=lambda: copy.deepcopy(
@@ -169,7 +169,7 @@ class Job(object):
                     "params", JOB_ATTR_DEFAULTS["params"]
                 )
             ),
-            retry_ids=lambda: self._acc_state.get(
+            retry_ids=lambda: self.state(force_refresh=True).get(
                 "retry_ids", JOB_ATTR_DEFAULTS["retry_ids"]
             ),
             retry_parent=lambda: self._acc_state.get(
@@ -225,7 +225,6 @@ class Job(object):
     def final_state(self):
         if self.was_terminal is True:
             return self.state()
-        # refresh?
         return None
 
     def info(self):
@@ -269,18 +268,16 @@ class Job(object):
         """
         given a state data structure (as emitted by ee2), update the stored state in the job object
         """
-        if state:
+        if state.get("job_id") != self.job_id:
+            raise ValueError(
+                f"Job ID mismatch in update_state: job ID: {self.job_id}; state ID: {state.get('job_id')}"
+            )
 
-            if "job_id" in state and state["job_id"] != self.job_id:
-                raise ValueError(
-                    f"Job ID mismatch in update_state: job ID: {self.job_id}; state ID: {state['job_id']}"
-                )
-
-            state = copy.deepcopy(state)
-            if self._acc_state is None:
-                self._acc_state = state
-            else:
-                self._acc_state.update(state)
+        state = copy.deepcopy(state)
+        if self._acc_state is None:
+            self._acc_state = state
+        else:
+            self._acc_state.update(state)
 
         return copy.deepcopy(self._acc_state)
 
@@ -300,14 +297,14 @@ class Job(object):
         Queries the job service to see the state of the current job.
         """
 
-        if self.was_terminal and not force_refresh:
+        if not force_refresh and self.was_terminal:
             state = copy.deepcopy(self._acc_state)
         else:
-            state = self.query_ee2_state(self.job_id, False)
+            state = self.query_ee2_state(self.job_id, init=False)
             state = self.update_state(state)
 
-        for field in EXCLUDED_JOB_STATE_FIELDS:
-            if field in state and field != "job_input":
+        for field in JOB_INIT_EXCLUDED_JOB_STATE_FIELDS:
+            if field in state:
                 del state[field]
 
         return state
@@ -596,7 +593,7 @@ class Job(object):
             )
 
         inst_child_ids = [job.job_id for job in children]
-        if sorted(inst_child_ids) != sorted(self.child_jobs):
+        if sorted(inst_child_ids) != sorted(self._acc_state.get("child_jobs")):
             raise ValueError("Child job id mismatch")
 
     def update_children(self, children: List["Job"]) -> None:

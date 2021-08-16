@@ -206,6 +206,30 @@ def get_test_job_states():
     return job_states
 
 
+@mock.patch("biokbase.narrative.jobs.job.clients.get", get_mock_client)
+def get_batch_family_jobs(return_list=False):
+    """
+    As invoked in appmanager's run_app_bulk, i.e.,
+    with from_job_id(s)
+    """
+    child_jobs = Job.from_job_ids(BATCH_CHILDREN, return_list=True)
+    batch_job = Job.from_job_id(
+        BATCH_PARENT,
+        children=child_jobs
+    )
+
+    if return_list:
+        return [batch_job] + child_jobs
+    else:
+        return {
+            BATCH_PARENT: batch_job,
+            **{
+                child_id: child_job
+                for child_id, child_job in zip(BATCH_CHILDREN, child_jobs)
+            }
+        }
+
+
 class JobTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -231,29 +255,6 @@ class JobTest(unittest.TestCase):
         # load mock specs
         with mock.patch("biokbase.narrative.jobs.job.clients.get", get_mock_client):
             SpecManager().reload()
-
-    @mock.patch("biokbase.narrative.jobs.job.clients.get", get_mock_client)
-    def _get_batch_family_jobs(self, return_list=False):
-        """
-        As invoked in appmanager's run_app_bulk, i.e.,
-        with from_job_id(s)
-        """
-        child_jobs = Job.from_job_ids(BATCH_CHILDREN, return_list=True)
-        batch_job = Job.from_job_id(
-            BATCH_PARENT,
-            children=child_jobs
-        )
-
-        if return_list:
-            return [batch_job] + child_jobs
-        else:
-            return {
-                BATCH_PARENT: batch_job,
-                **{
-                    child_id: child_job
-                    for child_id, child_job in zip(BATCH_CHILDREN, child_jobs)
-                }
-            }
 
     def check_jobs_equal(self, jobl, jobr):
         self.assertEqual(
@@ -354,7 +355,7 @@ class JobTest(unittest.TestCase):
         """
         test job initialization, as is done by run_app_bulk
         """
-        batch_jobs = self._get_batch_family_jobs(return_list=False)
+        batch_jobs = get_batch_family_jobs(return_list=False)
 
         for job_id, job in batch_jobs.items():
             self.check_job_attrs(job, job_id)
@@ -474,7 +475,7 @@ class JobTest(unittest.TestCase):
         """
         job = create_job_from_ee2(JOB_CREATED)
         self.assertFalse(job.was_terminal)
-        job.update_state(None)
+        job.update_state({})
         self.assertFalse(job.was_terminal)
 
     @mock.patch("biokbase.narrative.jobs.job.clients.get", get_mock_client)

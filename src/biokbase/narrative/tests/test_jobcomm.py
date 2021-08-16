@@ -1,6 +1,7 @@
 import unittest
 from unittest import mock
 import os
+import pytest
 
 from biokbase.narrative.jobs.job import get_dne_job_state, JOB_ATTR_DEFAULTS
 import biokbase.narrative.jobs.jobcomm
@@ -165,40 +166,88 @@ class JobCommTestCase(unittest.TestCase):
     @mock.patch(
         "biokbase.narrative.jobs.jobcomm.jobmanager.clients.get", get_mock_client
     )
-    def test_lookup_job_state_direct_ok(self):
-        job_id = JOB_COMPLETED
-        req = make_comm_msg("job_state", job_id, True)
-        state = self.jc._lookup_job_state(req)
-        msg = self.jc._comm.last_message
-        self.assertEqual({JOB_COMPLETED: state}, msg["data"]["content"])
-        self.assertEqual("job_status", msg["data"]["msg_type"])
-        validate_job_state(state)
-
-    def test_lookup_job_state_no_job(self):
-        job_id = None
-        req = make_comm_msg("job_state", job_id, True)
-
-        with self.assertRaises(ValueError) as e:
-            self.jc._lookup_job_state(req)
-        self.assertIn("Job id required to process job_state request", str(e.exception))
+    def test_lookup_job_states__1_ok(self):
+        job_id_list = [JOB_COMPLETED]
+        req = make_comm_msg("job_status", job_id_list, True)
+        output_states = self.jc._lookup_job_states(req)
         msg = self.jc._comm.last_message
         self.assertEqual(
-            {"job_id": None, "source": "job_state"}, msg["data"]["content"]
+            {
+                "msg_type": "job_status",
+                "content": output_states,
+            },
+            msg["data"]
         )
-        self.assertEqual("job_does_not_exist", msg["data"]["msg_type"])
+        for job_id, state in output_states.items():
+            self.assertEqual(
+                self.job_states[job_id],
+                state
+            )
+            validate_job_state(state)
 
-    def test_lookup_job_state_bad_job(self):
-        job_id = "nope"
-        req = make_comm_msg("job_state", job_id, True)
-        with self.assertRaises(ValueError) as e:
-            self.jc._lookup_job_state(req)
-        self.assertIn(f"No job present with id {job_id}", str(e.exception))
+    @mock.patch(
+        "biokbase.narrative.jobs.jobcomm.jobmanager.clients.get", get_mock_client
+    )
+    def test_lookup_job_states__2_ok(self):
+        job_id_list = [JOB_COMPLETED, JOB_ERROR]
+        req = make_comm_msg("job_status", job_id_list, True)
+        output_states = self.jc._lookup_job_states(req)
         msg = self.jc._comm.last_message
         self.assertEqual(
-            {job_id: {"state": {"job_id": job_id, "status": "does_not_exist"}}},
-            msg["data"]["content"],
+            {
+                "msg_type": "job_status",
+                "content": output_states,
+            },
+            msg["data"]
         )
-        self.assertEqual("job_status", msg["data"]["msg_type"])
+        for job_id, state in output_states.items():
+            self.assertEqual(
+                self.job_states[job_id],
+                state
+            )
+            validate_job_state(state)
+
+    def test_lookup_job_states__no_job(self):
+        job_id_list = [None]
+        req = make_comm_msg("job_status", job_id_list, True)
+        with self.assertRaisesRegex(NoJobException, "No valid job ids"):
+            self.jc._lookup_job_states(req)
+        msg = self.jc._comm.last_message
+        self.assertEqual(
+            {
+                "msg_type": "job_does_not_exist",
+                "content": {
+                    "source": "job_status",
+                    "job_id_list": [],
+                },
+            },
+            msg["data"]
+        )
+
+    def test_lookup_job_states__ok_bad(self):
+        job_id_list = ["nope", JOB_COMPLETED]
+        req = make_comm_msg("job_status", job_id_list, True)
+        output_states = self.jc._lookup_job_states(req)
+        msg = self.jc._comm.last_message
+        self.assertEqual(
+            {
+                "msg_type": "job_status",
+                "content": output_states
+            },
+            msg["data"],
+        )
+        for job_id, state in output_states.items():
+            if job_id in self.job_states:
+                self.assertEqual(
+                    self.job_states[job_id],
+                    state
+                )
+                validate_job_state(state)
+            else:
+                self.assertEqual(
+                    get_dne_job_state(job_id),
+                    state
+                )
 
     # -----------------------
     # Lookup batch job states
@@ -917,13 +966,13 @@ class JobRequestTestCase(unittest.TestCase):
         self._check_rq_equal(rqc0, rqc1)
 
     def test_translate_require_job_id(self):
-        rq_msg = make_comm_msg("job_info", "a", False)
+        rq_msg = make_comm_msg(JobRequest.REQUIRE_JOB_ID[0], "a", False)
         rqs = JobRequest.translate(rq_msg)
         self.assertEqual(len(rqs), 1)
         self.assertEqual(rqs[0].job_id, "a")
         self.assertEqual(rqs[0].job_id_list, None)
 
-        rq_msg = make_comm_msg("job_info", ["a", "b"], False)
+        rq_msg = make_comm_msg(JobRequest.REQUIRE_JOB_ID[0], ["a", "b"], False)
         rqs = JobRequest.translate(rq_msg)
         self.assertEqual(len(rqs), 2)
         self.assertEqual(rqs[0].job_id, "a")
@@ -932,13 +981,13 @@ class JobRequestTestCase(unittest.TestCase):
         self.assertEqual(rqs[1].job_id_list, None)
 
     def test_translate_require_job_id_list(self):
-        rq_msg = make_comm_msg("retry_job", "a", False)
+        rq_msg = make_comm_msg(JobRequest.REQUIRE_JOB_ID_LIST[0], "a", False)
         rqs = JobRequest.translate(rq_msg)
         self.assertEqual(len(rqs), 1)
         self.assertEqual(rqs[0].job_id, None)
         self.assertEqual(rqs[0].job_id_list, ["a"])
 
-        rq_msg = make_comm_msg("retry_job", ["a", "b"], False)
+        rq_msg = make_comm_msg(JobRequest.REQUIRE_JOB_ID_LIST[0], ["a", "b"], False)
         rqs = JobRequest.translate(rq_msg)
         self.assertEqual(len(rqs), 1)
         self.assertEqual(rqs[0].job_id, None)

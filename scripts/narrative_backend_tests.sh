@@ -6,4 +6,4 @@ pytest \
     --cov-report=html \
     --cov-report=xml \
     --ignore=src/biokbase/narrative/tests/util.py \
-    src/biokbase/narrative/tests
+    src/biokbase/narrative/tests/test_jobcomm.py

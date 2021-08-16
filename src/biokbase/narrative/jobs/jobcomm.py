@@ -50,15 +50,20 @@ class JobRequest:
     # each kind of request handling requires a job_id, a job_id_list,
     # or none of those
     REQUIRE_JOB_ID = [
-        "job_info",
         "job_info_batch",
-        "job_status",
         "job_status_batch",
-        "start_job_update",
-        "stop_job_update",
+        "start_job_update_batch",
+        "stop_job_update_batch",
         "job_logs",
     ]
-    REQUIRE_JOB_ID_LIST = ["retry_job", "cancel_job"]
+    REQUIRE_JOB_ID_LIST = [
+        "job_info",
+        "job_status",
+        "retry_job",
+        "cancel_job",
+        "start_job_update",
+        "stop_job_update",
+    ]
 
     def __init__(self, rq: dict):
         self.msg_id = rq.get("msg_id")  # might be useful later?
@@ -174,17 +179,19 @@ class JobComm:
         if self._msg_map is None:
             self._msg_map = {
                 "all_status": self._lookup_all_job_states,
-                "job_status": self._lookup_job_state,
-                "job_info": self._lookup_job_info,
+                "job_status": self._lookup_job_states,
+                "job_status_batch": self._lookup_job_state_batch,
+                "job_info": self._lookup_job_infos,
+                "job_info_batch": self._lookup_job_info_batch,
                 "start_update_loop": self.start_job_status_loop,
                 "stop_update_loop": self.stop_job_status_loop,
-                "start_job_update": self._modify_job_update,
-                "stop_job_update": self._modify_job_update,
+                "start_job_update": self._modify_job_updates,
+                "start_job_update_batch": None,
+                "stop_job_update": self._modify_job_updates,
+                "stop_job_update_batch": None,
                 "cancel_job": self._cancel_jobs,
                 "retry_job": self._retry_jobs,
                 "job_logs": self._get_job_logs,
-                "job_status_batch": self._lookup_job_state_batch,
-                "job_info_batch": self._lookup_job_info_batch,
             }
 
     def _verify_job_id(self, req: JobRequest) -> None:
@@ -195,7 +202,7 @@ class JobComm:
     def _verify_job_id_list(self, req: JobRequest) -> None:
         if not isinstance(req.job_id_list, list):
             raise TypeError("List expected for job_id_list")
-        req.job_id_list[:] = [job_id for job_id in req.job_id_list if job_id]
+        req.job_id_list[:] = [job_id for job_id in set(req.job_id_list) if job_id]
         if len(req.job_id_list) == 0:
             self.send_error_message("job_does_not_exist", req)
             raise NoJobException("No valid job ids")
@@ -257,7 +264,7 @@ class JobComm:
         self.send_comm_message("job_status_all", all_job_states)
         return all_job_states
 
-    def _lookup_job_info(self, req: JobRequest) -> dict:
+    def _lookup_job_infos(self, req: JobRequest) -> dict:
         """
         Looks up job info. This is just some high-level generic information about the running
         job, including the app id, name, and job parameters.
@@ -268,11 +275,11 @@ class JobComm:
             - job_id - str - just re-reporting the id string
             - job_params - dict - the params that were passed to that particular job
         """
-        self._verify_job_id(req)
+        self._verify_job_id_list(req)
         try:
-            job_info = self._jm.lookup_job_info(req.job_id)
-            self.send_comm_message("job_info", {req.job_id: job_info})
-            return job_info
+            job_infos = self._jm.lookup_job_infos(req.job_id_list)
+            self.send_comm_message("job_info", job_infos)
+            return job_infos
         except ValueError:
             self.send_error_message("job_does_not_exist", req)
             raise
@@ -305,27 +312,20 @@ class JobComm:
         )
         return self._lookup_job_state(req)
 
-    def _lookup_job_state(self, req: JobRequest) -> dict:
+    def _lookup_job_states(self, req: JobRequest) -> dict:
         """
         Look up job state.
         """
-        self._verify_job_id(req)
+        self._verify_job_id_list(req)
+
         try:
-            job_state = self._jm.get_job_state(req.job_id)
-            self.send_comm_message("job_status", {req.job_id: job_state})
-            return job_state
-        except ValueError:
-            # kblogging.log_event(self._log, "lookup_job_state_error", {"err": str(e)})
+            output_states = self._jm.get_job_states(req.job_id_list)
+        except NoJobException:
             self.send_error_message("job_does_not_exist", req)
-            self.send_comm_message(
-                "job_status",
-                {
-                    req.job_id: {
-                        "state": {"job_id": req.job_id, "status": "does_not_exist"}
-                    }
-                },
-            )
             raise
+
+        self.send_comm_message("job_status", output_states)
+        return output_states
 
     def _lookup_job_state_batch(self, req: JobRequest) -> dict:
         self._verify_job_id(req)
@@ -348,7 +348,11 @@ class JobComm:
         self.send_comm_message("job_status", output_states)
         return output_states
 
-    def _modify_job_update(self, req: JobRequest) -> None:
+    def _modify_job_updates_batch(self, req: JobRequest):
+        self._verify_job_id(req)
+        
+
+    def _modify_job_updates(self, req: JobRequest) -> None:
         """
         Modifies how many things want to listen to a job update.
         If this is a request to start a job update, then this starts the update loop that
@@ -360,9 +364,38 @@ class JobComm:
         If the given job_id in the request doesn't exist in the current Narrative, or is None,
         this raises a ValueError.
         """
-        self._verify_job_id(req)
-        update_adjust = 1 if req.request == "start_job_update" else -1
-        self._jm.modify_job_refresh(req.job_id, update_adjust)
+        self._verify_job_id_list(req)
+
+        if req.request in ["start_job_update", "start_job_update_batch"]:
+            update_adjust = 1
+        elif req.request in ["stop_job_update", "stop_job_update_batch"]:
+            update_adjust = -1
+        else:
+            raise Exception()
+
+        try:
+            # Update any batch jobs and incorporate
+            # any batch child IDs into the request
+            child_ids = []
+            for job_id in req.job_id_list:
+                job = self._jm.get_job(job_id)
+                if job.batch_job:
+                    child_ids.append(
+                        self._jm.update_batch_job(job_id)
+                    )
+            for child_id in child_ids:
+                if child_id not in req.job_id_list:
+                    req.job_id_list.append(child_id)
+
+            for job_id in req.job_id_list:
+                self._jm.modify_job_refresh(job_id, update_adjust)
+
+            output_states = self._jm.get_job_states(req.job_id_list)
+        except NoJobException:
+            pass
+
+        self.send_comm_message("job_status", output_states)
+
         if update_adjust == 1:
             self.start_job_status_loop()
 
